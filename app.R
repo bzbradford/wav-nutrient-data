@@ -8,8 +8,8 @@ options(warn = -1)
 
 # Functions ---------------------------------------------------------------
 
-colorize <- function(text, color) {
-  paste0("<span style='color: ", color, "'>", text, "</span>")
+colorize <- function(text, color = text) {
+  HTML(paste0("<span style='color: ", color, "'>", text, "</span>"))
 }
 
 
@@ -28,7 +28,7 @@ stations <- data %>%
   mutate(LogTP = log1p(MeanTP)) %>%
   left_join(station_years, by = "StationID") %>%
   select(Year, YearsActive, everything())
-
+phoslimit <- 0.075 # mg/L, ppm
 
 
 
@@ -90,8 +90,8 @@ ui <- fluidPage(
   fluidRow(
     column(12,
       h4("Exceedance criteria"),
-      p("The blue dashed lines on the plot of your data represent the 80% confidence interval for the median TP at this site. This means that, given the TP concentrations measured this year, there is about an 80% chance that the true median total phosphorus concentration falls somewhere between those lines. We know that TP in streams varies quite a bit, so individual samples could be higher or lower than the confidence interval."),
-      p("A stream site is considered 'Criteria Exceeded' if: 1) the lower 80% confidence limit of the sample median exceeds the state TP criterion of 0.075 mg/L or 0.1 mg/L or 2) there is corroborating WDNR biological data to support an adverse response in the fish or macroinvertebrate communities. If there is insufficient data for either of these requirements, more data will need to be collected in subsequent years before a decision can be made. A site is designated as “Watch Waters” if the total phosphorus state criterion concentration falls within the confidence limit or additional data are required, and a site is considered to have “Met Criteria” if the upper limit of the confidence interval does not exceed the criterion. This year, many sites are assigned “Watch Waters” because fewer than six samples were collected. Nevertheless, these total phosphorus measurements will still improve our understanding of stream health at this site."),
+      p("The shaded horizontal band on the plot represents the 90% confidence interval for the median total phosphorus (TP) at this site (if more than one month of data was collected). This means that, given the TP concentrations measured this year, there is about an 90% chance that the true median total phosphorus concentration falls somewhere between those lines. We know that TP in streams varies quite a bit, so individual samples could be higher or lower than the confidence interval."),
+      p("A stream site is considered 'Criteria Exceeded' and the confidence interval band will be shaded", colorize("red"), "if: 1) the lower 90% confidence limit of the sample median exceeds the state TP criterion of", phoslimit, "mg/L or 2) there is corroborating WDNR biological data to support an adverse response in the fish or macroinvertebrate communities. If there is insufficient data for either of these requirements, more data will need to be collected in subsequent years before a decision can be made. A site is designated as 'Watch Waters' if the total phosphorus state criterion concentration falls within the confidence limit or additional data are required, and a site is considered to have 'Met Criteria' if the upper limit of the confidence interval does not exceed the criterion (shaded confidence interval band will be", HTML(paste0(colorize("teal"), ").")), "This year, many sites are assigned 'Watch Waters' because fewer than six samples were collected. Nevertheless, these total phosphorus measurements will still improve our understanding of stream health at this site."),
       br(),
       h4("Why Phosphorus?"),
       p("Phosphorus is an essential nutrient responsible for plant growth, but it is also the most visible, widespread water pollutant in lakes. Small increases in phosphorus levels can bring about substantial increases in aquatic plant and algae growth, which in turn can reduce the recreational use and biodiversity. When the excess plants die and are decomposed, oxygen levels in the water drop dramatically which can lead to fish kills. Additionally, one of the most common impairments in Wisconsin’s streams is excess sediment that covers stream bottoms. Since phosphorus moves attached to sediments, it is intimately connected with this source of pollution in our streams. Phosphorus originates naturally from rocks, but its major sources in streams and lakes today are usually associated with human activities: soil erosion, human and animal wastes, septic systems, and runoff from farmland or lawns. Phosphorus-containing contaminants from urban streets and parking lots such as food waste, detergents, and paper products are also potential sources of phosphorus pollution from the surrounding landscape. The impact that phosphorus can have in streams is less apparent than in lakes due to the overall movement of water, but in areas with low velocity, where sediment can settle and deposit along the bottom substrate, algae blooms can result."),
@@ -166,6 +166,26 @@ server <- function(input, output, sessions) {
       arrange(Date)
   })
   
+  phos_estimate <- reactive({
+    vals <- na.omit(stn_data()$TP)
+    log_vals <- log(vals)
+    n <- length(vals)
+    meanp <- mean(log_vals)
+    se <- sd(log_vals) / sqrt(n)
+    tval <- qt(p = 0.90, df = n - 1)
+    
+    params <- list(
+      mean = meanp,
+      median = median(log_vals),
+      lower = meanp - tval * se,
+      upper = meanp + tval * se
+    )
+    
+    params <- lapply(params, exp)
+    params <- lapply(params, round, 3)
+    params["n"] <- n
+    params
+  })
   
   
   
@@ -371,7 +391,7 @@ server <- function(input, output, sessions) {
         value = "plot",
         plotlyOutput("plot"),
         div(style = "margin: 0.5em 1em; 0.5em 1em;", align = "center",
-          p(em("The dashed line on this plot indicates the state total phosphorus exceedance level of 0.075 mg/L (ppm)"))
+          p(em("The dashed line on this plot indicates the total phosphorus state exceedance level of 0.075 mg/L (ppm). If more than one month of data was collected, the median and 90% confidence interval for the true total phosphorus level are displayed as a horizontal band."))
         )
       ),
       open = "plot"
@@ -390,6 +410,21 @@ server <- function(input, output, sessions) {
     )
   }
   
+  rect <- function(ymin, ymax, color = "red") {
+    list(
+      type = "rect",
+      fillcolor = color,
+      line = list(color = color),
+      opacity = 0.1,
+      y0 = ymin,
+      y1 = ymax,
+      xref = "paper",
+      x0 = 0,
+      x1 = 1,
+      layer = "below"
+    )
+  }
+  
   output$plot <- renderPlotly({
     req(input$year)
     req(input$station)
@@ -397,17 +432,68 @@ server <- function(input, output, sessions) {
     plot_title <- str_trunc(paste0("Station ", cur_stn()$StationID, ": ", cur_stn()$StationName), width = 80)
     df <- stn_data() %>%
       mutate(Exceedance = factor(
-        ifelse(is.na(TP), "No data", ifelse(TP > 0.075, "High", "OK")),
+        ifelse(is.na(TP), "No data", ifelse(TP >= phoslimit, "High", "OK")),
         levels = c("OK", "High", "No data"))) %>%
       drop_na(TP)
-    daterange = c(
-      as.Date(paste0(input$year, "-05-01")),
-      as.Date(paste0(input$year, "-10-31"))
-    )
-    yrange = c(0, max(0.25, max(df$TP, na.rm = T)))
+    date_range <- as.Date(paste0(input$year, c("-05-01", "-10-31")))
+    outer_months <- as.Date(paste0(input$year, c("-04-30", "-11-1")))
+    data_dates <-  as.Date(paste(input$year, 5:10, 15, sep = "-"))
+    all_dates <-  c(outer_months, data_dates)
+    yrange <- c(0, max(0.25, max(df$TP, na.rm = T)))
     
-    plot_ly(df) %>%
+    phos_params <- tibble(
+      Date = all_dates,
+      Lower = phos_estimate()$lower,
+      Upper = phos_estimate()$upper,
+      Median = phos_estimate()$median
+    )
+    
+    
+    # no confidence invervals if only one month of data
+    if (phos_estimate()$n > 1) {
+      ci_color <- ifelse(phos_estimate()$upper >= phoslimit, "red", "teal")
+      
+      plt <- plot_ly(phos_params) %>%
+        add_lines(
+          x = ~Date,
+          y = ~Upper,
+          name = "Upper 90% CI",
+          xperiod = "M1",
+          xperiodalignment = "middle",
+          opacity = 0.5,
+          line = list(color = ci_color, width = 0.5)
+        ) %>%
+        add_lines(
+          x = ~Date,
+          y = ~Median,
+          name = "Median",
+          xperiod = "M1",
+          xperiodalignment = "middle",
+          opacity = 0.5,
+          line = list(color = "darkblue", width = 2)
+        ) %>%
+        add_lines(
+          x = ~Date,
+          y = ~Lower,
+          name = "Lower 90% CI",
+          xperiod = "M1",
+          xperiodalignment = "middle",
+          opacity = 0.5,
+          line = list(color = ci_color, width = 0.5)
+        )
+      
+      shapes <- list(
+        rect(phos_estimate()$lower, phos_estimate()$upper, ci_color),
+        hline(phoslimit)
+        )
+    } else {
+      plt <- plot_ly()
+      shapes <- hline(phoslimit)
+    }
+    
+    plt <- plt %>%
       add_trace(
+        data = df,
         x = ~Date,
         y = ~TP,
         type = "bar",
@@ -422,7 +508,7 @@ server <- function(input, output, sessions) {
           line = list(color = "rgb(8,48,107)", width = 1)
         ),
         textfont = list(color = "black"),
-        hovertemplate = "Total phosphorus (ppm): %{y:.3f}<extra></extra>"
+        hovertemplate = "Measured TP: %{y:.3f}<extra></extra>"
       ) %>%
       layout(
         title = plot_title,
@@ -433,17 +519,20 @@ server <- function(input, output, sessions) {
           tickformat = "%B<br>%Y",
           dtick = "M1",
           ticklabelmode = "period",
-          range = daterange),
+          range = date_range),
         yaxis = list(
           title = "Total phosphorus (ppm)",
           zerolinecolor = "lightgrey",
           range = yrange),
+        legend = list(
+          traceorder = "reversed"
+        ),
         hovermode = "x unified",
         margin = list(t = 50),
-        shapes = list(
-          hline(0.075)
-        )
+        shapes = shapes
       )
+    
+    plt
   })
 }
 

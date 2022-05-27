@@ -5,9 +5,9 @@ account: bbradford
 server: data-viz.it.wisc.edu
 hostUrl: https://data-viz.it.wisc.edu/__api__
 appId: 356
-bundleId: 1942
-url: https://data-viz.it.wisc.edu/content/3e9ac61b-9c2c-4639-a8f5-ef9614166761/
-when: 1653609241.96679
-lastSyncTime: 1653609241.96679
+bundleId: 1944
+url: https://data-viz.it.wisc.edu/wav-nutrient-data/
+when: 1653666381.44052
+lastSyncTime: 1653666381.44052
 asMultiple: FALSE
 asStatic: FALSE
