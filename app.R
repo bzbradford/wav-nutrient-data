@@ -109,7 +109,9 @@ ui <- fluidPage(
   p(
     style = "color: grey; font-size: smaller; font-style: italic;",
     align = "center",
-    "Developed by Ben Bradford, UW-Madison Entomology", br(),
+    "Dashboard developed by",
+    a("Ben Bradford", href = "https://github.com/bzbradford", target = "_blank", .noWS = "after"),
+    ", UW-Madison Entomology", br(),
     paste("Last updated:", format(file.info(".")$mtime, "%Y-%m-%d")), br(),
     a("Source code", href = "https://github.com/bzbradford/wav-nutrient-data", target = "_blank")
   )
